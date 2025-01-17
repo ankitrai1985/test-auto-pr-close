@@ -1,0 +1,20 @@
+name: Close Stale Pull Requests
+
+on:
+  schedule:
+    - cron: '*/15 * * * *' 
+  workflow_dispatch:
+
+jobs:
+  close-stale-prs:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Close stale pull requests
+        uses: actions/stale@v4
+        with:
+          repo-token: ${{ secrets.GITHUB_TOKEN }}
+          days-before-stale: 0
+          days-before-close: 0
+          stale-issue-message: 'This pull request has been automatically marked as stale because it has not had recent activity. It will be closed if no further activity occurs.'
+          close-issue-message: 'This pull request has been automatically closed due to inactivity.'
+          only-prs: true
