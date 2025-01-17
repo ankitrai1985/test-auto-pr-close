@@ -27,7 +27,7 @@ jobs:
           label_exists=$(gh api repos/${{ github.repository }}/labels --jq '.[] | select(.name == "housekeeping-stale-branch")')
           if [ -z "$label_exists" ]; then
             echo "Creating 'housekeeping-stale-branch' label with red color."
-            gh api repos/${{ github.repository }}/labels -f name="housekeeping-stale-branch" -f color="ff0000" -f description="Used for housekeeping PRs"
+            gh api repos/${{ github.repository }}/labels -f name="housekeeping-stale-branch" -f color="D4C5F9" -f description="Used for housekeeping PRs"
           else
             echo "'housekeeping-stale-branch' label already exists."
           fi
