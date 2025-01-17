@@ -8,9 +8,11 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      # Step 1: Checkout the repository
+      # Step 1: Checkout the repository with full history
       - name: Checkout Repository
         uses: actions/checkout@v3
+        with:
+          fetch-depth: 0  # Fetch all history to ensure all branches are available
 
       # Step 2: Setup GitHub CLI
       - name: Setup GitHub CLI
@@ -18,7 +20,7 @@ jobs:
         with:
           node-version: '16'
 
-      # Step 3: Ensure the "housekeeping" label exists
+      # Step 3: Ensure the "housekeeping-stale-branch" label exists
       - name: Ensure Housekeeping Label Exists
         env:
           GITHUB_TOKEN: ${{ secrets.MY_PAT_TOKEN }}
@@ -26,8 +28,8 @@ jobs:
           # Check if the label exists
           label_exists=$(gh api repos/${{ github.repository }}/labels --jq '.[] | select(.name == "housekeeping-stale-branch")')
           if [ -z "$label_exists" ]; then
-            echo "Creating 'housekeeping-stale-branch' label with red color."
-            gh api repos/${{ github.repository }}/labels -f name="housekeeping-stale-branch" -f color="D4C5F9" -f description="Used for housekeeping PRs"
+            echo "Creating 'housekeeping-stale-branch' label with color #ededed."
+            gh api repos/${{ github.repository }}/labels -f name="housekeeping-stale-branch" -f color="ededed" -f description="Used for housekeeping PRs"
           else
             echo "'housekeeping-stale-branch' label already exists."
           fi
@@ -40,7 +42,6 @@ jobs:
         run: |
           echo "Fetching branches..."
           # Fetch branches excluding main, develop, master, and check for inactivity
-          # stale_branches=$(gh api repos/${{ github.repository }}/branches --jq '.[] | select(.name != "main" and .name != "develop" and .name != "master") | select(.commit.committer.date < now - (180*86400) ) | .name')
           stale_branches=$(gh api repos/${{ github.repository }}/branches --jq '.[] | select(.name != "main" and .name != "develop" and .name != "master") | select(.commit.committer.date < now ) | .name')
           if [ -z "$stale_branches" ]; then
             echo "No stale branches found."
@@ -64,24 +65,24 @@ jobs:
               continue
             fi
             echo "No open PRs found for branch $branch. Proceeding."
-            # Check if the branch has commits different from the main branch
-            commit_diff=$(git diff origin/main...origin/"$branch")
-            if [ -z "$commit_diff" ]; then
-              echo "No commits between main and $branch. Deleting branch directly."
+            # Check if there are any differences between the branch and the base branch
+            if git diff --quiet origin/main...origin/"$branch"; then
+              echo "No differences found between main and $branch. Deleting branch $branch."
+              # Delete the stale branch
               gh api -X DELETE repos/${{ github.repository }}/git/refs/heads/$branch
               echo "Branch $branch deleted."
-              continue
+            else
+              # Create a PR against the default branch (main or master)
+              pr_url=$(gh pr create --head "$branch" --base "main" --title "Housekeeping: Cleanup $branch" --body "Preserving changes from stale branch $branch.")
+              echo "PR created: $pr_url"
+              # Add a "housekeeping-stale-branch" label to the PR
+              pr_number=$(echo "$pr_url" | grep -o '[0-9]*$') # Extract PR number from URL
+              gh pr edit "$pr_number" --add-label "housekeeping-stale-branch"
+              echo "Added 'housekeeping-stale-branch' label to PR $pr_number."
+              # Immediately close the PR
+              gh pr close "$pr_url" --comment "Closing stale PR for branch $branch. The branch will now be deleted as part of the cleanup process."
+              # Delete the stale branch
+              gh api -X DELETE repos/${{ github.repository }}/git/refs/heads/$branch
+              echo "Branch $branch deleted."
             fi
-            # Create a PR against the default branch (main or master)
-            pr_url=$(gh pr create --head "$branch" --base "main" --title "Housekeeping: Cleanup $branch" --body "Preserving changes from stale branch $branch.")
-            echo "PR created: $pr_url"
-            # Add a "housekeeping-stale-branch" label to the PR
-            pr_number=$(echo "$pr_url" | grep -o '[0-9]*$') # Extract PR number from URL
-            gh pr edit "$pr_number" --add-label "housekeeping-stale-branch"
-            echo "Added 'housekeeping-stale-branch' label to PR $pr_number."
-            # Immediately close the PR
-            gh pr close "$pr_url" --comment "Closing stale PR for branch $branch. The branch will now be deleted as part of the cleanup process."
-            # Delete the stale branch
-            gh api -X DELETE repos/${{ github.repository }}/git/refs/heads/$branch
-            echo "Branch $branch deleted."
           done < branches.txt
