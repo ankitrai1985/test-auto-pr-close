@@ -46,24 +46,20 @@ jobs:
             exit 0
           fi
           echo "Stale branches found: $stale_branches"
-          echo "$stale_branches" >> $GITHUB_ENV # Using environment file to pass data
+          echo "$stale_branches" > branches.txt # Write each branch name to a file
 
-      # Step 5: Create PR, Label, and Close Stale Branches
+      # Step 5: Raise PR, Label, and Close Stale Branches
       - name: Raise PR, Label, and Close Stale Branches
         env:
           GITHUB_TOKEN: ${{ secrets.MY_PAT_TOKEN }}
         run: |
-          branches=${{ env.stale_branches }}
-          echo "Processing the following stale branches: $branches"
-          # Initialize an empty string for failed branches
-          failed_branches=""
-          for branch in $branches; do
+          # Read branches from file and process each branch
+          while IFS= read -r branch; do
             echo "Processing branch: $branch"
             # Check if the branch has any open PRs
             open_prs=$(gh pr list --head "$branch" --json url --jq '.[].url')
             if [ -n "$open_prs" ]; then
               echo "Skipping branch $branch as it has open PRs: $open_prs"
-              failed_branches="$failed_branches\n$branch"
               continue
             fi
             echo "No open PRs found for branch $branch. Proceeding."
@@ -79,8 +75,4 @@ jobs:
             # Delete the stale branch
             gh api -X DELETE repos/${{ github.repository }}/git/refs/heads/$branch
             echo "Branch $branch deleted."
-          done
-          # Output failed branches (those with open PRs)
-          if [ -n "$failed_branches" ]; then
-            echo "The following branches had open PRs and were skipped: $failed_branches"
-          fi
+          done < branches.txt
