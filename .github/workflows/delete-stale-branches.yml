@@ -18,7 +18,21 @@ jobs:
         with:
           node-version: '16'
 
-      # Step 3: Identify and process stale branches
+      # Step 3: Ensure the "housekeeping" label exists
+      - name: Ensure Housekeeping Label Exists
+        env:
+          GITHUB_TOKEN: ${{ secrets.MY_PAT_TOKEN }}
+        run: |
+          # Check if the label exists
+          label_exists=$(gh api repos/${{ github.repository }}/labels --jq '.[] | select(.name == "housekeeping")')
+          if [ -z "$label_exists" ]; then
+            echo "Creating 'housekeeping' label with red color."
+            gh api repos/${{ github.repository }}/labels -f name="housekeeping" -f color="ff0000" -f description="Used for housekeeping PRs and tasks"
+          else
+            echo "'housekeeping' label already exists."
+          fi
+
+      # Step 4: Identify and process stale branches
       - name: Identify Stale Branches
         id: stale-branches
         env:
@@ -27,16 +41,14 @@ jobs:
           echo "Fetching branches..."
           # Fetch branches excluding main, develop, master, and check for inactivity > 6 months
           stale_branches=$(gh api repos/${{ github.repository }}/branches --jq '.[] | select(.name != "main" and .name != "develop" and .name != "master") | select(.commit.committer.date < now ) | .name')
-
           if [ -z "$stale_branches" ]; then
             echo "No stale branches found."
             exit 0
           fi
-
           echo "Stale branches found: $stale_branches"
           echo "::set-output name=branches::$stale_branches"
 
-      # Step 4: Create PR, Label, and Close Stale Branches
+      # Step 5: Create PR, Label, and Close Stale Branches
       - name: Raise PR, Label, and Close Stale Branches
         env:
           GITHUB_TOKEN: ${{ secrets.MY_PAT_TOKEN }}
@@ -44,47 +56,23 @@ jobs:
           branches=${{ steps.stale-branches.outputs.branches }}
           for branch in $branches; do
             echo "Processing branch: $branch"
-
             # Check if the branch has any open PRs
             open_prs=$(gh pr list --head "$branch" --json url --jq '.[].url')
-
             if [ -n "$open_prs" ]; then
               echo "Skipping branch $branch as it has open PRs: $open_prs"
               continue
             fi
-
             echo "No open PRs found for branch $branch. Proceeding."
-
             # Create a PR against the default branch (main or master)
             pr_url=$(gh pr create --head "$branch" --base "main" --title "Housekeeping: Cleanup $branch" --body "Preserving changes from stale branch $branch.")
-
             echo "PR created: $pr_url"
-
             # Add a "housekeeping" label to the PR
             pr_number=$(echo "$pr_url" | grep -o '[0-9]*$') # Extract PR number from URL
             gh pr edit "$pr_number" --add-label "housekeeping"
-
             echo "Added 'housekeeping' label to PR $pr_number."
-
             # Immediately close the PR
             gh pr close "$pr_url" --comment "Closing housekeeping PR for branch $branch. The branch will now be deleted as part of the cleanup process."
-
             # Delete the stale branch
             gh api -X DELETE repos/${{ github.repository }}/git/refs/heads/$branch
             echo "Branch $branch deleted."
           done
-
-      # Step 5: Ensure the "housekeeping" label exists with red color
-      - name: Ensure Housekeeping Label Exists
-        env:
-          GITHUB_TOKEN: ${{ secrets.MY_PAT_TOKEN }}
-        run: |
-          # Check if the label exists
-          label_exists=$(gh api repos/${{ github.repository }}/labels --jq '.[] | select(.name == "housekeeping")')
-
-          if [ -z "$label_exists" ]; then
-            echo "Creating 'housekeeping' label with red color."
-            gh api repos/${{ github.repository }}/labels -f name="housekeeping" -f color="ff0000" -f description="Used for housekeeping PRs and tasks"
-          else
-            echo "'housekeeping' label already exists."
-          fi
