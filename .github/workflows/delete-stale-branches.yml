@@ -64,6 +64,14 @@ jobs:
               continue
             fi
             echo "No open PRs found for branch $branch. Proceeding."
+            # Check if the branch has commits different from the main branch
+            commit_diff=$(git diff origin/main...origin/"$branch")
+            if [ -z "$commit_diff" ]; then
+              echo "No commits between main and $branch. Deleting branch directly."
+              gh api -X DELETE repos/${{ github.repository }}/git/refs/heads/$branch
+              echo "Branch $branch deleted."
+              continue
+            fi
             # Create a PR against the default branch (main or master)
             pr_url=$(gh pr create --head "$branch" --base "main" --title "Housekeeping: Cleanup $branch" --body "Preserving changes from stale branch $branch.")
             echo "PR created: $pr_url"
