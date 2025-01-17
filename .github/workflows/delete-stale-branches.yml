@@ -39,21 +39,21 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.MY_PAT_TOKEN }}
         run: |
           echo "Fetching branches..."
-          # Fetch branches excluding main, develop, master, and check for inactivity > 6 months
+          # Fetch branches excluding main, develop, master, and check for inactivity
           stale_branches=$(gh api repos/${{ github.repository }}/branches --jq '.[] | select(.name != "main" and .name != "develop" and .name != "master") | select(.commit.committer.date < now ) | .name')
           if [ -z "$stale_branches" ]; then
             echo "No stale branches found."
             exit 0
           fi
           echo "Stale branches found: $stale_branches"
-          echo "::set-output name=branches::$stale_branches"
+          echo "$stale_branches" >> $GITHUB_ENV # Using environment file to pass data
 
       # Step 5: Create PR, Label, and Close Stale Branches
       - name: Raise PR, Label, and Close Stale Branches
         env:
           GITHUB_TOKEN: ${{ secrets.MY_PAT_TOKEN }}
         run: |
-          branches=${{ steps.stale-branches.outputs.branches }}
+          branches=${{ env.stale_branches }}
           echo "Processing the following stale branches: $branches"
           # Initialize an empty string for failed branches
           failed_branches=""
