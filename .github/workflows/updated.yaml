@@ -1,0 +1,144 @@
+name: Housekeeping Stale Branches
+
+on:
+  workflow_call:
+    inputs:
+      dry-run:
+        description: "Run in dry mode"
+        type: boolean
+        required: true
+        default: true
+    
+jobs:
+  stale-branch-cleanup:
+    runs-on: ubuntu-latest
+
+    steps:
+      # Step 1: Checkout the repository with full history
+      - name: Checkout Repository
+        uses: actions/checkout@v3
+        with:
+          fetch-depth: 0  # Fetch all history to ensure all branches are available
+
+      # Step 2: Setup GitHub CLI
+      - name: Setup GitHub CLI
+        uses: actions/setup-node@v3
+        with:
+          node-version: '16'
+
+      # Step 3: Ensure the "housekeeping-stale-branch" label exists
+      - name: Ensure Housekeeping Label Exists
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          # Check if the label exists
+          label_exists=$(gh api repos/${{ github.repository }}/labels --jq '.[] | select(.name == "housekeeping-stale-branch")')
+          if [ -z "$label_exists" ]; then
+            echo "Creating 'housekeeping-stale-branch' label with color #ededed. 🎨"
+            gh api repos/${{ github.repository }}/labels -f name="housekeeping-stale-branch" -f color="ededed" -f description="Used for housekeeping PRs"
+          else
+            echo "'housekeeping-stale-branch' label already exists. ✅"
+          fi
+
+      # Step 4: Identify and process stale branches
+      - name: Identify Stale Branches
+        id: stale-branches
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          # Check if dry-run input is true
+          if [ "${{ inputs.dry-run }}" == "true" ]; then
+            echo -e "\033[33mRunning in dry-run mode... No changes will be made.\033[0m"
+          else
+            echo -e "\033[32mExecuting actual changes.\033[0m"
+          fi
+          echo -e "\033[31mFetching branch details...\033[0m"
+          brancheswithprotected=$(gh api repos/${{ github.repository }}/branches)
+          echo "Branches with protected: $brancheswithprotected"
+          branches=$(gh api repos/${{ github.repository }}/branches --jq '.[] | select(.protected == false)' | jq -s '.')
+          echo -e "\033[34mBranch details: $branches\033[0m"
+
+          # Get the stale cutoff date (90 days ago)
+          # stale_cutoff=$(date -u -d '90 days ago' +%Y-%m-%dT%H:%M:%SZ)
+          stale_cutoff=$(date -u -d '1 minute ago' +%Y-%m-%dT%H:%M:%SZ)
+          echo -e "\033[35mStale Cutoff Date: $stale_cutoff\033[0m"
+
+          # Default branch
+          default_branch="${{ github.event.repository.default_branch }}"
+          echo -e "\033[36mThe default branch is: $default_branch\033[0m"
+
+          stale_branches=""
+
+          # Loop through branches and check for staleness
+          for branch in $(echo "$branches" | jq -r '.[].name'); do
+            # Skip main, develop, master, and default branch
+            if [[ "$branch" == "main" || "$branch" == "develop" || "$branch" == "master" ]]; then
+              continue
+            fi
+            echo "skipping done"
+            # Fetch commit details for the branch
+            commit_url=$(echo "$branches" | jq -r ".[] | select(.name == \"$branch\") | .commit.url")
+            commit_details=$(gh api "$commit_url")
+            commit_date=$(echo "$commit_details" | jq -r '.commit.committer.date')
+          
+
+            echo -e "\033[33mBranch: $branch, Committer Date: $commit_date\033[0m"
+
+            # Compare commit date with stale cutoff
+            if [[ -n "$branch" && -n "$commit_date" && "$commit_date" < "$stale_cutoff" ]]; then
+              echo -e "\033[34mStale Branch Found: $branch\033[0m"
+              stale_branches+="$branch"$'\n'
+            fi
+          done
+
+          # Remove any trailing newlines or empty lines
+          stale_branches=$(echo "$stale_branches" | sed '/^$/d')
+
+          # Check if any stale branches were found
+          if [ -z "$stale_branches" ]; then
+            echo -e "\033[32mNo stale branches found. 🛑\033[0m"
+            exit 0
+          fi
+
+          # Save stale branches to a file
+          echo "$stale_branches" > branches.txt
+          echo "Stale branches saved to branches.txt"
+
+  
+      # Step 5: Raise PR, Label, and Close Stale Branches
+      - name: Raise PR, Label, and Close Stale Branches
+        if: ${{ !inputs.dry-run }}
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          # Read branches from file and process each branch
+          while IFS= read -r branch; do
+            echo -e "\033[33m=====> Processing branch: $branch \033[0m 💥"
+            # Check if the branch has any open PRs
+            open_prs=$(gh pr list --head "$branch" --json url --jq '.[].url')
+            if [ -n "$open_prs" ]; then
+              echo -e "\033[34mSkipping branch $branch as it has open PRs: $open_prs \033[0m🚫"
+              continue
+            fi
+            echo -e "\033[36mNo open PRs found for branch $branch. Proceeding.\033[0m 🎉"
+            # Check if there are any differences between the branch and the base branch (Default)
+            if git diff --quiet origin/${{ github.event.repository.default_branch }}...origin/"$branch"; then
+              echo -e "\033[31mNo differences found between ${{ github.event.repository.default_branch }} and $branch. Deleting branch $branch.\033[0m 💀"
+              # Delete the stale branch
+              gh api -X DELETE repos/${{ github.repository }}/git/refs/heads/$branch
+              echo -e "\033[31mBranch $branch deleted.\033[0m 🗑️"
+            else
+              # Create a PR against the default branch
+              pr_url=$(gh pr create --head "$branch" --base ${{ github.event.repository.default_branch }} --title "Housekeeping: Cleanup $branch" --body "Preserving changes from stale branch $branch.")
+              echo -e "\033[32mPR created: $pr_url \033[0m ✨"
+              # Add a "housekeeping-stale-branch" label to the PR
+              pr_number=$(echo "$pr_url" | grep -o '[0-9]*$') # Extract PR number from URL
+              gh pr edit "$pr_number" --add-label "housekeeping-stale-branch"
+              echo -e "\033[34mAdded 'housekeeping-stale-branch' label to PR $pr_number.\033[0m 🏷️"
+              # Immediately close the PR
+              gh pr close "$pr_url" --comment "Closing stale PR for branch $branch. The branch will now be deleted as part of the cleanup process."
+              # Delete the stale branch
+              gh api -X DELETE repos/${{ github.repository }}/git/refs/heads/$branch
+              echo -e "\033[35mBranch $branch deleted.\033[0m 🗑️"
+            fi
+          done < branches.txt
