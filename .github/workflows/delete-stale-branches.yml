@@ -42,7 +42,7 @@ jobs:
         run: |
           echo "Fetching branches..."
           # Fetch branches excluding main, develop, master, and check for inactivity
-          stale_branches=$(gh api repos/${{ github.repository }}/branches --jq '.[] | select(.name != "main" and .name != "develop" and .name != "master") | select(.commit.committer.date < now ) | .name')
+          stale_branches=$(gh api repos/${{ github.repository }}/branches --jq '.[] | select(.name != "main" and .name != "develop" and .name != "master" and .protected != true) | select(.commit.committer.date < now ) | .name')
           if [ -z "$stale_branches" ]; then
             echo "No stale branches found."
             exit 0
