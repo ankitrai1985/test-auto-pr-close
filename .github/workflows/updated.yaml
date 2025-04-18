@@ -58,8 +58,8 @@ jobs:
           echo -e "\033[34mBranch details: $branches\033[0m"
 
           # Get the stale cutoff date (90 days ago)
-          stale_cutoff=$(date -u -d '90 days ago' +%Y-%m-%dT%H:%M:%SZ)
-          # stale_cutoff=$(date -u -d '1 minute ago' +%Y-%m-%dT%H:%M:%SZ)
+          # stale_cutoff=$(date -u -d '90 days ago' +%Y-%m-%dT%H:%M:%SZ)
+          stale_cutoff=$(date -u -d '1 minute ago' +%Y-%m-%dT%H:%M:%SZ)
           echo -e "\033[35mStale Cutoff Date: $stale_cutoff\033[0m"
 
           # Default branch
