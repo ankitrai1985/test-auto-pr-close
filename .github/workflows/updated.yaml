@@ -53,14 +53,13 @@ jobs:
             echo -e "\033[32mExecuting actual changes.\033[0m"
           fi
           echo -e "\033[31mFetching branch details...\033[0m"
-          brancheswithprotected=$(gh api repos/${{ github.repository }}/branches)
-          echo "Branches with protected: $brancheswithprotected"
+
           branches=$(gh api repos/${{ github.repository }}/branches --jq '.[] | select(.protected == false)' | jq -s '.')
           echo -e "\033[34mBranch details: $branches\033[0m"
 
           # Get the stale cutoff date (90 days ago)
-          # stale_cutoff=$(date -u -d '90 days ago' +%Y-%m-%dT%H:%M:%SZ)
-          stale_cutoff=$(date -u -d '1 minute ago' +%Y-%m-%dT%H:%M:%SZ)
+          stale_cutoff=$(date -u -d '90 days ago' +%Y-%m-%dT%H:%M:%SZ)
+          # stale_cutoff=$(date -u -d '1 minute ago' +%Y-%m-%dT%H:%M:%SZ)
           echo -e "\033[35mStale Cutoff Date: $stale_cutoff\033[0m"
 
           # Default branch
@@ -75,12 +74,11 @@ jobs:
             if [[ "$branch" == "main" || "$branch" == "develop" || "$branch" == "master" ]]; then
               continue
             fi
-            echo "skipping done"
+
             # Fetch commit details for the branch
             commit_url=$(echo "$branches" | jq -r ".[] | select(.name == \"$branch\") | .commit.url")
             commit_details=$(gh api "$commit_url")
             commit_date=$(echo "$commit_details" | jq -r '.commit.committer.date')
-          
 
             echo -e "\033[33mBranch: $branch, Committer Date: $commit_date\033[0m"
 
@@ -92,12 +90,16 @@ jobs:
           done
 
           # Remove any trailing newlines or empty lines
-          stale_branches=$(echo "$stale_branches" | sed '/^$/d')
+          stale_branches=$(echo "$stale_branches" | sed '/^$/d')  
 
-          # Check if any stale branches were found
           if [ -z "$stale_branches" ]; then
-            echo -e "\033[32mNo stale branches found. 🛑\033[0m"
+            echo -e "\033[32m================================\033[0m"
+            echo -e "  \033[32m🍃✅ Nothing stale to remove!\033[0m"
+            echo -e "\033[32m================================\033[0m"
+            echo "no_stale_branches_flag=true" >> $GITHUB_OUTPUT
             exit 0
+          else
+            echo "no_stale_branches_flag=false" >> $GITHUB_OUTPUT
           fi
 
           # Save stale branches to a file
@@ -107,7 +109,7 @@ jobs:
   
       # Step 5: Raise PR, Label, and Close Stale Branches
       - name: Raise PR, Label, and Close Stale Branches
-        if: ${{ !inputs.dry-run }}
+        if: ${{ !inputs.dry-run && steps.stale-branches.outputs.no_stale_branches_flag == 'false' }}
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
@@ -126,7 +128,7 @@ jobs:
               echo -e "\033[31mNo differences found between ${{ github.event.repository.default_branch }} and $branch. Deleting branch $branch.\033[0m 💀"
               # Delete the stale branch
               gh api -X DELETE repos/${{ github.repository }}/git/refs/heads/$branch
-              echo -e "\033[31mBranch $branch deleted.\033[0m 🗑️"
+              echo -e "\033[31mBranch : $branch deleted.\033[0m 🗑️"
             else
               # Create a PR against the default branch
               pr_url=$(gh pr create --head "$branch" --base ${{ github.event.repository.default_branch }} --title "Housekeeping: Cleanup $branch" --body "Preserving changes from stale branch $branch.")
